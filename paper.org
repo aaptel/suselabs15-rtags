@@ -1,0 +1,203 @@
+#+TITLE: rtags: the smart source code indexer
+#+AUTHOR: Aurélien Aptel <aaptel@suse.com>
+
+* Introduction
+
+A source code indexing program lets developers quickly jump to
+definitions and references of variables, types and functions. The most
+advanced ones can even provide source code completion. It's a really
+useful tool to understand an existing code-base. Unfortunately C and
+especially C++ have complex context-free grammars and many tricky
+edge-cases that makes them hard to parse with LALR[fn:lalr] parsers
+generators (e.g. bison, yacc). Most C and C++ compiler front-ends are
+written by hand[fn:handwritten] for this reason.
+
+Most of the existing (open source) indexers written before Clang
+(e.g. ctags, exuberant ctags, etags) used their own parsers, which
+worked in most cases but would fail on certain things: conditional
+compilation, inheritance, virtual functions and template
+meta-programming comes to mind. Their database were also very simple:
+very basic type information, no knowledge of the compilation
+configuration (defines, include path, ...). Now that Clang parser can
+be used as a library, a new breed of robust source code indexers are
+being released.
+
+* What is =rtags=?
+
+=rtags= is a Clang based indexer made of 2 programs:
+
+- =rdm=, a server that index files and handles database queries.
+- =rc=, the client to control =rdm= (make queries, set project
+  configuration, ...)
+
+It has some nice features:
+- =rdm= uses Linux =inotify= system to automatically re-index source
+  file on changes. Since it knows about your project setup it will also
+  follow dependencies when a file change occurs.
+- Indexing jobs are done in parallel. Files are indexed by worker
+  threads and will use all your cores and processors by default.
+- =rtags= is really aimed towards Emacs users and comes bundled with
+  an Emacs minor-mode (vim users can look for a similar plug-in called
+  YouCompleteMe[fn:ycm]).
+- =rtags= tries to prioritize the indexing jobs so that it will
+  re-index the files you are editing first.
+- It also does context-aware smart auto-completion although it seems
+  broken at the moment.
+
+Keep in mind that =rtags= is still experimental software and is under
+active development. Any help welcome!
+
+* Installation
+
+You can download it on Github[fn:rtagsgh] and follow the build
+instructions there or use the =rtags= package I made for
+openSUSE[fn:opensuse].
+
+* Configuration
+
+** Project configuration
+
+Once you have installed =rtags=, run =rdm=. You now have to teach
+=rdm= how your project is compiled. The basic way to do it is to prefix all your
+compilation commands with =rc -c= (e.g. =rc -c gcc -I.. -Dfoobar -c blah.c=).
+Depending on your build system it can be very easy. As soon as =rdm=
+knows about your project it will start indexing.
+
+The index database is saved and re-used when =rdm= is started again.
+
+
+*** CMake
+With =cmake=, you can do:
+#+BEGIN_EXAMPLE
+cmake . -DCMAKE_EXPORT_COMPILE_COMMANDS
+rc -J .
+#+END_EXAMPLE
+
+It will output a =compile_commands.json= file =rc= knows how to parse.
+
+*** Ninja
+
+With =ninja=, you can use:
+
+#+BEGIN_EXAMPLE
+ninja -t commands | rc -c -
+#+END_EXAMPLE
+
+*** Makefile and other build systems
+
+For anything else, you can use the small shell wrapper around gcc
+bundled with rtags and fully compile your project.
+
+#+BEGIN_EXAMPLE
+# my .zshrc
+# make sure ~/bin is in front of you $PATH
+
+function start-rtags-wrapper() {
+    ln -s ~/prog/rtags/bin/gcc-rtags-wrapper.sh ~/bin/gcc
+    ln -s ~/prog/rtags/bin/gcc-rtags-wrapper.sh ~/bin/c++
+    ln -s ~/prog/rtags/bin/gcc-rtags-wrapper.sh ~/bin/cc
+    ln -s ~/prog/rtags/bin/gcc-rtags-wrapper.sh ~/bin/g++
+}
+
+function stop-rtags-wrapper() {
+    rm -f ~/bin/{gcc,cc,g++,c++}
+}
+#+END_EXAMPLE
+
+
+
+=rtags= uses some heuristics like the name file you are editing or the
+presence of a =.git= directory to determine when you are using or
+configuring different projects. The Emacs package should handle it
+fine on its own but you can explicitely switch between projects with:
+
+#+BEGIN_EXAMPLE
+rc -w projectname
+#+END_EXAMPLE
+
+** Emacs configuration
+
+Add the =rtags= elisp directory to your load-path and set the
+keybindings.
+
+#+BEGIN_SRC emacs-lisp
+;; if you built rtags manually you might need to do this (change path
+;; accordingly)
+(add-to-list 'exec-path (expand-file-name "~/prog/rtags/bin")) ;; path to rdm/rc
+(add-to-list 'load-path (expand-file-name "~/prog/rtags/src")) ;; path to rtags.el
+
+(eval-after-load 'cc-mode
+  '(progn
+     (require 'rtags)
+     (mapc (lambda (x)
+	     (define-key c-mode-base-map
+	       (kbd (concat "C-c r " (car x))) (cdr x)))
+	   '(("." . rtags-find-symbol-at-point)
+	     ("," . rtags-find-references-at-point)
+	     ("v" . rtags-find-virtuals-at-point)
+	     ("V" . rtags-print-enum-value-at-point)
+	     ("/" . rtags-find-all-references-at-point)
+	     ("Y" . rtags-cycle-overlays-on-screen)
+	     (">" . rtags-find-symbol)
+	     ("<" . rtags-find-references)
+	     ("-" . rtags-location-stack-back)
+	     ("+" . rtags-location-stack-forward)
+	     ("D" . rtags-diagnostics)
+	     ("G" . rtags-guess-function-at-point)
+	     ("p" . rtags-set-current-project)
+	     ("P" . rtags-print-dependencies)
+	     ("e" . rtags-reparse-file)
+	     ("E" . rtags-preprocess-file)
+	     ("R" . rtags-rename-symbol)
+	     ("M" . rtags-symbol-info)
+	     ("S" . rtags-display-summary)
+	     ("O" . rtags-goto-offset)
+	     (";" . rtags-find-file)
+	     ("F" . rtags-fixit)
+	     ("X" . rtags-fix-fixit-at-point)
+	     ("B" . rtags-show-rtags-buffer)
+	     ("I" . rtags-imenu)
+	     ("T" . rtags-taglist)))))
+#+END_SRC
+
+* Usage
+
+You should now be able to use =rtags= on an indexed project. You can
+try out some of the functions listed in the previous section.  Here
+are some examples:
+
+** Types and prototypes
+
+- Open a file of the project in Emacs.
+- Place the cursor on a variable and hit =C-c r M=
+- You should see the database information about the symbol (type,
+  definition place, ...).
+- Doing the same thing on a function or method call will show the function prototype.
+
+** Symbol definition
+
+- Place the cursor on a symbol.
+- Hit =C-c r .= to jump to its definition.
+- Each jump is pushed in a stack and you can use =C-c r -= and =C-c r += to navigate
+  in this stack.
+
+** Finding references
+
+- Place the cursor on a symbol.
+- Hit =C-c r /= to list all the places where the symbol is used.
+- The commands opens a new window where you can hit =RET= on each
+  occurrence to jump to it.
+
+* Final words
+
+=rtags= is a really nice project that needs more contributors. If you
+feel like helping, the code is hosted on Github[fn:rtagsgh].
+
+
+[fn:handwritten] Both GCC and Clang use a handwritten recursive
+descent parser as of 2015.
+[fn:lalr] /Look-Ahead, Left-to-right, Rightmost derivation/,
+https://en.wikipedia.org/wiki/LALR_parser
+[fn:rtagsgh] https://github.com/Andersbakken/rtags
+[fn:opensuse] https://build.opensuse.org/package/show/home:aaptel:rtags/rtags
+[fn:ycm] http://valloric.github.io/YouCompleteMe/
