@@ -2,8 +2,10 @@
 ;; if you built rtags manually you might need to do this (change path
 ;; accordingly)
 
-(add-to-list 'exec-path (expand-file-name "~/prog/rtags/bin")) ;; path to rdm/rc
-(add-to-list 'load-path (expand-file-name "~/prog/rtags/src")) ;; path to rtags.el
+;;(add-to-list 'exec-path (expand-file-name "~/prog/rtags/bin")) ;; path to rdm/rc
+;;(add-to-list 'load-path (expand-file-name "~/prog/rtags/src")) ;; path to rtags.el
+
+
 
 (eval-after-load 'cc-mode
   '(progn
@@ -38,3 +40,5 @@
 	     ("I" . rtags-imenu)
 	     ("T" . rtags-taglist)))))
 
+(setq make-backup-files nil)
+ 

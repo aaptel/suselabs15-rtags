@@ -21,4 +21,9 @@ private:
 	size_t m_top;
 };
 
+
+struct A { int foo_bar; };
+
+struct B { int foo_bar; };
+
 #endif

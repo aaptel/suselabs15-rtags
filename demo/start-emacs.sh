@@ -1,5 +1,5 @@
 #!/bin/bash
 
-emacs -Q -l emacs.d/init.el $*
+emacs -l emacs.d/init.el $*
 
 
